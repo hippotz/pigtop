@@ -1,0 +1,10 @@
+[package]
+name = "pigtop"
+version = "0.1.0"
+edition = "2024"
+default-run = "pigtop"
+
+[dependencies]
+libc = "0.2"
+tao = "0.34"
+tray-icon = "0.24.1"

@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffb6c9"/>
+      <stop offset="100%" stop-color="#ff8fab"/>
+    </linearGradient>
+  </defs>
+
+  <!-- signal waves, hinting at network traffic -->
+  <g stroke="#8a8f98" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.55">
+    <path d="M182 70 a40 40 0 0 1 0 56"/>
+    <path d="M196 58 a58 58 0 0 1 0 80"/>
+  </g>
+
+  <!-- ears -->
+  <path d="M70 62 L98 100 L54 104 Z" fill="#ff8fab"/>
+  <path d="M186 62 L158 100 L202 104 Z" fill="#ff8fab"/>
+
+  <!-- head -->
+  <circle cx="128" cy="140" r="72" fill="url(#body)"/>
+
+  <!-- cheeks -->
+  <circle cx="82" cy="156" r="14" fill="#ff6f91" opacity="0.55"/>
+  <circle cx="174" cy="156" r="14" fill="#ff6f91" opacity="0.55"/>
+
+  <!-- eyes -->
+  <circle cx="102" cy="126" r="7" fill="#2b2b2b"/>
+  <circle cx="154" cy="126" r="7" fill="#2b2b2b"/>
+
+  <!-- snout -->
+  <ellipse cx="128" cy="164" rx="34" ry="24" fill="#ff6f91"/>
+  <ellipse cx="115" cy="164" rx="6" ry="9" fill="#c4507a"/>
+  <ellipse cx="141" cy="164" rx="6" ry="9" fill="#c4507a"/>
+</svg>
