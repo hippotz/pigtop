@@ -10,6 +10,10 @@ use pigtop::rates::ProcessBandwidth;
 const PEAK_NOTEWORTHY_RATIO: f64 = 1.05;
 const PEAK_NOTEWORTHY_AGE: Duration = Duration::from_secs(2);
 
+/// Only processes moving at least this much bandwidth (right now, or within PEAK_WINDOW) count
+/// as a "bandwidth pig" worth surfacing — anything below this is just background chatter.
+const PIG_THRESHOLD_BYTES_PER_SEC: f64 = 1024.0 * 1024.0;
+
 /// Number of process rows in the dropdown. Fixed so the menu's item list never needs rebuilding
 /// (see MenuBar's doc comment for why that matters).
 const SLOT_COUNT: usize = 8;
@@ -53,15 +57,21 @@ impl MenuBar {
     /// Sets the title to the current top bandwidth consumer and updates each dropdown slot's
     /// text in place.
     pub fn update(&self, ranked: &[ProcessBandwidth]) {
-        // Recently active = either using bandwidth right now, or did within the last PEAK_WINDOW
-        // (rates.rs already sorts by max(current, peak), so this slice is in display order).
-        let recent: Vec<&ProcessBandwidth> =
-            ranked.iter().filter(|p| p.total_rate() > 0.0 || p.peak_rate > 0.0).collect();
+        // Bandwidth pigs = processes moving at least PIG_THRESHOLD_BYTES_PER_SEC, either right
+        // now or within the last PEAK_WINDOW (rates.rs already sorts by max(current, peak), so
+        // this slice is in display order).
+        let pigs: Vec<&ProcessBandwidth> = ranked
+            .iter()
+            .filter(|p| {
+                p.total_rate() >= PIG_THRESHOLD_BYTES_PER_SEC
+                    || p.peak_rate >= PIG_THRESHOLD_BYTES_PER_SEC
+            })
+            .collect();
 
-        let live = ranked.iter().find(|p| p.total_rate() > 0.0);
+        let live = ranked.iter().find(|p| p.total_rate() >= PIG_THRESHOLD_BYTES_PER_SEC);
         let title = match live {
             Some(top) => format!("{} {}", truncate(&top.name, 20), format_rate(top.total_rate())),
-            None => match recent.first() {
+            None => match pigs.first() {
                 Some(top) => format!(
                     "recently: {} {} ({}s ago)",
                     truncate(&top.name, 20),
@@ -73,15 +83,17 @@ impl MenuBar {
         };
         self.tray.set_title(Some(title));
 
-        if recent.is_empty() {
-            self.slots[0].set_text("No recent network traffic");
+        if pigs.is_empty() {
+            self.slots[0].set_text("No bandwidth pigs (≥ 1 MB/s)");
             for slot in &self.slots[1..] {
                 slot.set_text("");
             }
         } else {
-            for (slot, p) in self.slots.iter().zip(
-                recent.iter().map(Some).chain(std::iter::repeat(None)).take(SLOT_COUNT),
-            ) {
+            for (slot, p) in self
+                .slots
+                .iter()
+                .zip(pigs.iter().map(Some).chain(std::iter::repeat(None)).take(SLOT_COUNT))
+            {
                 slot.set_text(p.map(|p| format_menu_line(p)).unwrap_or_default());
             }
         }
