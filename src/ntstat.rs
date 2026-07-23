@@ -7,6 +7,10 @@
 use std::io;
 use std::mem;
 use std::os::unix::io::RawFd;
+use std::time::Duration;
+
+/// Baseline `SO_RCVTIMEO` used outside of boost mode — see `NtstatClient::set_recv_timeout`.
+pub const DEFAULT_RECV_TIMEOUT: Duration = Duration::from_millis(50);
 
 // --- PF_SYSTEM / kernel control socket setup (not exposed by the `libc` crate) ---
 
@@ -226,6 +230,24 @@ fn io_err(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, format!("{msg}: {}", io::Error::last_os_error()))
 }
 
+fn set_recv_timeout_on(fd: RawFd, timeout: Duration) -> io::Result<()> {
+    unsafe {
+        let tv =
+            libc::timeval { tv_sec: timeout.as_secs() as _, tv_usec: timeout.subsec_micros() as _ };
+        if libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            &tv as *const libc::timeval as *const libc::c_void,
+            size_of::<libc::timeval>() as u32,
+        ) != 0
+        {
+            return Err(io_err("setsockopt(SO_RCVTIMEO)"));
+        }
+    }
+    Ok(())
+}
+
 impl NtstatClient {
     /// Opens and connects the ntstat kernel control socket. Works for a normal (non-root) user
     /// observing their own processes' sources.
@@ -262,22 +284,24 @@ impl NtstatClient {
                 return Err(io_err("connect(AF_SYSTEM/com.apple.network.statistics)"));
             }
 
-            // Bound how long a single poll_all() can block waiting for the kernel to keep
-            // streaming fragments, so a protocol misunderstanding degrades to "returns early"
-            // rather than hanging forever. This is also the floor latency of every poll_all()
-            // call (the last recv() always runs out the clock to detect "no more data"), so it
-            // needs to stay well under the caller's poll interval or the interval is a no-op.
-            let tv = libc::timeval { tv_sec: 0, tv_usec: 50_000 };
-            libc::setsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_RCVTIMEO,
-                &tv as *const libc::timeval as *const libc::c_void,
-                size_of::<libc::timeval>() as u32,
-            );
+            // This is also the floor latency of every poll_all() call (the last recv() always
+            // runs out the clock to detect "no more data"), so the caller's poll interval needs
+            // to stay well above it or the interval is a no-op.
+            if let Err(e) = set_recv_timeout_on(fd, DEFAULT_RECV_TIMEOUT) {
+                libc::close(fd);
+                return Err(e);
+            }
 
             Ok(NtstatClient { fd, next_context: 1 })
         }
+    }
+
+    /// Bounds how long a single poll_all() can block waiting for the kernel to keep streaming
+    /// fragments, so a protocol misunderstanding degrades to "returns early" rather than hanging
+    /// forever. Callers driving a faster poll cadence (e.g. a UI "boost" mode) should shrink this
+    /// to match, since every poll_all() call blocks for close to this long on its final recv().
+    pub fn set_recv_timeout(&self, timeout: Duration) -> io::Result<()> {
+        set_recv_timeout_on(self.fd, timeout)
     }
 
     fn send(&self, buf: &[u8]) -> io::Result<()> {

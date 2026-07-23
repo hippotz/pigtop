@@ -43,7 +43,8 @@ fn main() {
         };
         let poll_elapsed = poll_started.elapsed();
 
-        let ranked = tracker.update(&samples);
+        tracker.record(&samples);
+        let ranked = tracker.snapshot();
 
         println!(
             "--- poll {i}: {} raw sources, {} distinct pids, poll took {:?} ---",

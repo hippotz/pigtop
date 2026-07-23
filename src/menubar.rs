@@ -55,8 +55,9 @@ impl MenuBar {
     }
 
     /// Sets the title to the current top bandwidth consumer and updates each dropdown slot's
-    /// text in place.
-    pub fn update(&self, ranked: &[ProcessBandwidth]) {
+    /// text in place. `boosted` reflects the click-to-toggle fast-poll mode (see main.rs); it
+    /// only changes the "⚡" prefix shown here, not anything poll-related in this file.
+    pub fn update(&self, ranked: &[ProcessBandwidth], boosted: bool) {
         // Bandwidth pigs = processes moving at least PIG_THRESHOLD_BYTES_PER_SEC, either right
         // now or within the last PEAK_WINDOW (rates.rs already sorts by max(current, peak), so
         // this slice is in display order).
@@ -81,7 +82,7 @@ impl MenuBar {
                 None => "PigTop".to_string(),
             },
         };
-        self.tray.set_title(Some(title));
+        self.tray.set_title(Some(if boosted { format!("⚡ {title}") } else { title }));
 
         if pigs.is_empty() {
             self.slots[0].set_text("No bandwidth pigs (≥ 1 MB/s)");

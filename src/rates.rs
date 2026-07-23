@@ -10,7 +10,6 @@ const PEAK_WINDOW: Duration = Duration::from_secs(60);
 struct PrevCounts {
     rx_bytes: u64,
     tx_bytes: u64,
-    at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -39,24 +38,37 @@ impl ProcessBandwidth {
     }
 }
 
-/// Turns consecutive raw ntstat snapshots into per-process bandwidth rates. Keeps prior
-/// cumulative counters keyed by srcref (a process can own several concurrent flows), so a
-/// closed-then-reopened socket that happens to reuse a srcref never sees a stale baseline —
-/// any srcref absent from the latest snapshot is dropped from the baseline before the next poll.
-#[derive(Default)]
+/// Turns raw ntstat snapshots into per-process bandwidth rates, in two decoupled phases so the
+/// poll cadence (which needs to be fast to catch short-lived flows, e.g. in "boost" mode) can
+/// run independently of the UI refresh cadence (which should stay steady so the displayed number
+/// doesn't flicker): `record()` folds one poll's byte deltas into a running per-pid total, cheap
+/// enough to call every poll; `snapshot()` converts whatever's accumulated since the *last*
+/// snapshot into a rate averaged over the actual wall time elapsed, at whatever cadence the
+/// caller wants the UI to update.
+///
+/// Keeps prior cumulative counters keyed by srcref (a process can own several concurrent flows),
+/// so a closed-then-reopened socket that happens to reuse a srcref never sees a stale baseline —
+/// any srcref absent from the latest poll is dropped from the baseline before the next one.
 pub struct RateTracker {
     prev: HashMap<u64, PrevCounts>,
+    accum: HashMap<u32, (String, f64, f64)>,
     peaks: HashMap<u32, PeakInfo>,
+    last_snapshot: Instant,
 }
 
 impl RateTracker {
     pub fn new() -> Self {
-        Self { prev: HashMap::new(), peaks: HashMap::new() }
+        Self {
+            prev: HashMap::new(),
+            accum: HashMap::new(),
+            peaks: HashMap::new(),
+            last_snapshot: Instant::now(),
+        }
     }
 
-    pub fn update(&mut self, samples: &[SourceSample]) -> Vec<ProcessBandwidth> {
-        let now = Instant::now();
-        let mut per_pid: HashMap<u32, (String, f64, f64)> = HashMap::new();
+    /// Folds one poll's raw samples into the running per-pid byte totals. Cheap and safe to call
+    /// far more often than snapshot() — it never computes a rate or touches the UI-facing state.
+    pub fn record(&mut self, samples: &[SourceSample]) {
         let mut seen = HashSet::new();
 
         for s in samples {
@@ -64,28 +76,38 @@ impl RateTracker {
             let pid = if s.pid != 0 { s.pid } else { s.epid };
 
             if let Some(prev) = self.prev.get(&s.srcref) {
-                let elapsed = now.duration_since(prev.at).as_secs_f64();
-                if elapsed > 0.0 {
-                    // Counters are cumulative and monotonic; a negative delta means the
-                    // source was torn down and a new one reused the srcref — treat as 0
-                    // rather than reporting a bogus negative rate.
-                    let rx_delta = s.rx_bytes.saturating_sub(prev.rx_bytes) as f64;
-                    let tx_delta = s.tx_bytes.saturating_sub(prev.tx_bytes) as f64;
-                    let entry = per_pid.entry(pid).or_insert_with(|| (s.pname.clone(), 0.0, 0.0));
-                    entry.1 += rx_delta / elapsed;
-                    entry.2 += tx_delta / elapsed;
-                }
+                // Counters are cumulative and monotonic; a negative delta means the source was
+                // torn down and a new one reused the srcref — treat as 0 rather than letting a
+                // bogus negative delta cancel out real traffic accumulated elsewhere this pid.
+                let rx_delta = s.rx_bytes.saturating_sub(prev.rx_bytes) as f64;
+                let tx_delta = s.tx_bytes.saturating_sub(prev.tx_bytes) as f64;
+                let entry = self.accum.entry(pid).or_insert_with(|| (s.pname.clone(), 0.0, 0.0));
+                entry.1 += rx_delta;
+                entry.2 += tx_delta;
             } else {
-                per_pid.entry(pid).or_insert_with(|| (s.pname.clone(), 0.0, 0.0));
+                self.accum.entry(pid).or_insert_with(|| (s.pname.clone(), 0.0, 0.0));
             }
 
-            self.prev.insert(
-                s.srcref,
-                PrevCounts { rx_bytes: s.rx_bytes, tx_bytes: s.tx_bytes, at: now },
-            );
+            self.prev.insert(s.srcref, PrevCounts { rx_bytes: s.rx_bytes, tx_bytes: s.tx_bytes });
         }
 
         self.prev.retain(|srcref, _| seen.contains(srcref));
+    }
+
+    /// Converts everything accumulated since the last snapshot into a rate (bytes over the
+    /// actual elapsed wall time, not the poll interval), resets the accumulator, and returns the
+    /// ranked list for display. Call this at whatever cadence you want the UI to refresh.
+    pub fn snapshot(&mut self) -> Vec<ProcessBandwidth> {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_snapshot).as_secs_f64().max(f64::EPSILON);
+        self.last_snapshot = now;
+
+        let per_pid: HashMap<u32, (String, f64, f64)> = std::mem::take(&mut self.accum)
+            .into_iter()
+            .map(|(pid, (name, rx_bytes, tx_bytes))| {
+                (pid, (name, rx_bytes / elapsed, tx_bytes / elapsed))
+            })
+            .collect();
 
         // A new high for a pid refreshes its peak (and the peak's age); a pid currently below
         // its own recent peak just leaves the existing peak alone to age out naturally.
