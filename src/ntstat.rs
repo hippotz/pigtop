@@ -264,8 +264,10 @@ impl NtstatClient {
 
             // Bound how long a single poll_all() can block waiting for the kernel to keep
             // streaming fragments, so a protocol misunderstanding degrades to "returns early"
-            // rather than hanging forever.
-            let tv = libc::timeval { tv_sec: 0, tv_usec: 300_000 };
+            // rather than hanging forever. This is also the floor latency of every poll_all()
+            // call (the last recv() always runs out the clock to detect "no more data"), so it
+            // needs to stay well under the caller's poll interval or the interval is a no-op.
+            let tv = libc::timeval { tv_sec: 0, tv_usec: 50_000 };
             libc::setsockopt(
                 fd,
                 libc::SOL_SOCKET,

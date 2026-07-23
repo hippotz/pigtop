@@ -58,7 +58,7 @@ fn main() {
                 }
                 Err(e) => eprintln!("pigtop: poll_all failed: {e}"),
             }
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_millis(100));
         }
     });
 

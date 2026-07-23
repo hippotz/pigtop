@@ -63,6 +63,6 @@ fn main() {
             );
         }
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_millis(100));
     }
 }
