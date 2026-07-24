@@ -71,7 +71,12 @@ impl MenuBar {
 
         let live = ranked.iter().find(|p| p.total_rate() >= PIG_THRESHOLD_BYTES_PER_SEC);
         let title = match live {
-            Some(top) => format!("{} {}", truncate(&top.name, 20), format_rate(top.total_rate())),
+            Some(top) => format!(
+                "{} {} {}",
+                direction_arrow(top.rx_rate, top.tx_rate),
+                truncate(&top.name, 20),
+                format_rate(top.total_rate())
+            ),
             None => match pigs.first() {
                 Some(top) => format!(
                     "recently: {} {} ({}s ago)",
@@ -117,6 +122,11 @@ fn format_menu_line(p: &ProcessBandwidth) -> String {
     } else {
         format!("{:<24} {}", truncate(&p.name, 24), now)
     }
+}
+
+/// Which direction dominates a process's current traffic, for the menu bar title's arrow.
+fn direction_arrow(rx_rate: f64, tx_rate: f64) -> char {
+    if tx_rate > rx_rate { '↑' } else { '↓' }
 }
 
 fn format_rate(bytes_per_sec: f64) -> String {
