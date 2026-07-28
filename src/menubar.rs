@@ -84,7 +84,7 @@ impl MenuBar {
                     format_rate(top.peak_rate),
                     top.peak_age.as_secs()
                 ),
-                None => "PigTop".to_string(),
+                None => "🐷".to_string(),
             },
         };
         self.tray.set_title(Some(if boosted { format!("⚡ {title}") } else { title }));
